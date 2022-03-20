@@ -31,7 +31,15 @@ class IP:
         # TODO: Use a tabela de encaminhamento para determinar o próximo salto
         # (next_hop) a partir do endereço de destino do datagrama (dest_addr).
         # Retorne o next_hop para o dest_addr fornecido.
-        pass
+        MASK = (0xffffffff << 8)
+
+        net = struct.unpack('!I', str2addr(self.tabela[0][-1]))[0]
+        dest_addr_number = struct.unpack('!I', str2addr(dest_addr))[0]
+        print(net & MASK, dest_addr_number & MASK)
+        if (net & MASK) == (dest_addr_number & MASK):
+            print(net)
+
+        return None
 
     def definir_endereco_host(self, meu_endereco):
         """
@@ -51,7 +59,9 @@ class IP:
         """
         # TODO: Guarde a tabela de encaminhamento. Se julgar conveniente,
         # converta-a em uma estrutura de dados mais eficiente.
-        pass
+        self.tabela = tabela
+        return
+        self.tabela = dict()
 
     def registrar_recebedor(self, callback):
         """
