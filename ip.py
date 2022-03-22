@@ -27,7 +27,46 @@ class IP:
             # atua como roteador
             next_hop = self._next_hop(dst_addr)
             # TODO: Trate corretamente o campo TTL do datagrama
-            self.enlace.enviar(datagrama, next_hop)
+            ttl -= 1
+            if ttl > 0:
+                version = 4
+                ihl = 5
+                dcspecn = (dscp << 2) + (ecn)
+                flagsfrev = (flags << 13) + (frag_offset)
+                vihl = (version << 4) + (ihl)
+                src, = struct.unpack('!I', str2addr(src_addr))
+                dest, = struct.unpack('!I', str2addr(dst_addr))
+                checksum = 0
+                total_length = 20 + len(payload)
+                datagrama = self.make_header(vihl, dcspecn, total_length, identification, \
+                    flagsfrev, ttl, proto, checksum, src, dest)
+                self.enlace.enviar(datagrama, next_hop)
+            else:
+                next_hop = self._next_hop(src_addr)
+                ttl = 64
+                msg_type = 11
+                code = 0
+                checksum = 0
+                msg = datagrama[:28]
+                icmp_header = struct.pack('!BBHI', msg_type, code, checksum, 0)
+                icmp_header += msg
+                checksum = calc_checksum(icmp_header)
+                icmp_header = struct.pack('!BBHI', msg_type, code, checksum, 0)
+                icmp_header += msg
+                version = 4
+                ihl = 5
+                dcspecn = (dscp << 2) + (ecn)
+                flagsfrev = (flags << 13) + (frag_offset)
+                vihl = (version << 4) + (ihl)
+                src, = struct.unpack('!I', str2addr(src_addr))
+                dest, = struct.unpack('!I', str2addr(self.meu_endereco))
+                proto = 1
+                checksum = 0
+                total_length = 20 + len(icmp_header)
+                ip_header = self.make_header(vihl, dcspecn, total_length, identification, \
+                    flagsfrev, ttl, proto, checksum, dest, src)
+                datagrama = ip_header + icmp_header
+                self.enlace.enviar(datagrama, next_hop)
 
     def _next_hop(self, dest_addr):
         # TODO: Use a tabela de encaminhamento para determinar o próximo salto
@@ -35,15 +74,19 @@ class IP:
         # Retorne o next_hop para o dest_addr fornecido.
 
         MASKSIZE = 32
+        biggest_offset = -1
+        next_hop = None
 
         for entrada in self.tabela:
             net = struct.unpack('!I', str2addr(entrada[0].split('/')[0]))[0]
             offset = int(entrada[0].split('/')[1])
             dest_addr_number = struct.unpack('!I', str2addr(dest_addr))[0]
             MASK = (0xffffffff << (MASKSIZE - offset))
-            if (net & MASK) == (dest_addr_number & MASK): 
-                return entrada[1]
+            if (net & MASK) == (dest_addr_number & MASK) and offset > biggest_offset: 
+                next_hop, biggest_offset = entrada[1], offset
 
+        if biggest_offset > -1:
+            return next_hop
 
     def definir_endereco_host(self, meu_endereco):
         """
@@ -86,28 +129,48 @@ class IP:
 
         # https://en.wikipedia.org/wiki/IPv4#Header
 
-        # Algo nesse sentido, tem q arrumar algumas coisas ainda
-        checksum = 0
-        protocol = 6
-        ttl = 64
-        flags = 0x0
-        frag_offset = 0x0
+        # Valores esperados pelo cabeçalho do protocolo
+        #################################
+        # Version tem 4 bits e Ihl tb
+        version = 4
+        ihl = 5
+        vihl = (version << 4) + (ihl)
+        #################################
+        # DCSP tem 6 bits e ecn 2 bits.
+        dcsp = 0 
+        ecn = 0
+        dcspecn = (dcsp << 2) + (ecn)
+        #################################
         total_len = 20 + len(segmento)
-        ecn = 0x0
-        dcsp = 0x0 
-        version = 0x4
-        ihl = 0x5
+        #################################
         self.identification += 1
+        #################################
+        # Flags tem 3 bits e flag offset 13
+        flags = 0
+        frag_offset = 0
+        flagsfrev = (flags << 13) + (frag_offset)
+        #################################
+        ttl = 64
+        #################################
+        protocol = 6
+        #################################
+        # Checksum no início vale 0
+        checksum = 0
 
-        ip_header = struct.pack('!BBHHHBBH', version, ihl, dcsp, ecn, total_len, self.identification, flags, \
-            frag_offset, ttl, protocol, checksum, self.meu_endereco, dest_addr)
-        ip_header += self.meu_endereco + dest_addr
-
-        checksum = calc_checksum(ip_header)
-        ip_header = struct.pack('!BBHHHBBH', version, ihl, dcsp, ecn, total_len, self.identification, flags, \
-            frag_offset, ttl, protocol, checksum)
-        ip_header += self.meu_endereco + dest_addr
-
+        src, = struct.unpack('!I', str2addr(self.meu_endereco))
+        dest, = struct.unpack('!I', str2addr(dest_addr))
+        ip_header = self.make_header(vihl, dcspecn, total_len, self.identification, \
+            flagsfrev, ttl, protocol, checksum, src, dest)
+        # print('CAVALO',ip_header, self.meu_endereco)
+        # ip_header += self.meu_endereco + dest_addr
 
         datagrama = ip_header + segmento
         self.enlace.enviar(datagrama, next_hop)
+
+    def make_header(self, vihl, dcspecn, total_len, identification, \
+            flagsfrev, ttl, protocol, checksum, src, dest):
+        ip_header = struct.pack('!BBHHHBBHII', vihl, dcspecn, total_len, identification, \
+            flagsfrev, ttl, protocol, checksum, src, dest)
+        checksum = calc_checksum(ip_header)
+        return struct.pack('!BBHHHBBHII', vihl, dcspecn, total_len, identification, \
+            flagsfrev, ttl, protocol, checksum, src, dest)
